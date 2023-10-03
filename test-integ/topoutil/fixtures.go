@@ -41,10 +41,10 @@ func NewFortioServiceWithDefaults(
 	}
 
 	if nodeVersion == topology.NodeVersionV2 {
-		svc.Ports = map[string]int{
-			"http":     httpPort,
-			"http-alt": httpPort,
-			"grpc":     grpcPort,
+		svc.Ports = map[string]*topology.Port{
+			"http":     {Number: httpPort, Protocol: "http"},
+			"http-alt": {Number: httpPort, Protocol: "http"},
+			"grpc":     {Number: grpcPort, Protocol: "grpc"},
 		}
 	} else {
 		svc.Port = httpPort

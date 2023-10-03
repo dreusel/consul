@@ -420,8 +420,41 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 					}
 				}
 
+				if n.IsV2() {
+					for _, u := range svc.ImpliedUpstreams {
+						u.Implied = true
+						// Default to that of the enclosing service.
+						if u.Peer == "" {
+							if u.ID.Partition == "" {
+								u.ID.Partition = svc.ID.Partition
+							}
+							if u.ID.Namespace == "" {
+								u.ID.Namespace = svc.ID.Namespace
+							}
+						} else {
+							if u.ID.Partition != "" {
+								u.ID.Partition = "" // irrelevant here; we'll set it to the value of the OTHER side for plumbing purposes in tests
+							}
+							u.ID.Namespace = NamespaceOrDefault(u.ID.Namespace)
+							foundPeerNames[c.Name][u.Peer] = struct{}{}
+						}
+
+						addTenancy(u.ID.Partition, u.ID.Namespace)
+
+						if u.PortName == "" {
+							return nil, fmt.Errorf("explicit upstreams must use port names in v2")
+						}
+					}
+				} else {
+					return nil, fmt.Errorf("v1 does not support implied upstreams yet")
+				}
+
 				if err := svc.Validate(); err != nil {
 					return nil, fmt.Errorf("cluster %q node %q service %q is not valid: %w", c.Name, n.Name, svc.ID.String(), err)
+				}
+
+				if svc.EnableTransparentProxy && !n.IsDataplane() {
+					return nil, fmt.Errorf("cannot enable tproxy on a non-dataplane node")
 				}
 
 				if n.IsV2() {
@@ -429,26 +462,27 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 						svc.V2Services = []string{svc.ID.Name}
 
 						var svcPorts []*pbcatalog.ServicePort
-						for name := range svc.Ports {
+						for name, cfg := range svc.Ports {
 							svcPorts = append(svcPorts, &pbcatalog.ServicePort{
 								TargetPort: name,
-								Protocol:   pbcatalog.Protocol_PROTOCOL_TCP, // TODO
-							})
-						}
-						if !svc.DisableServiceMesh {
-							svcPorts = append(svcPorts, &pbcatalog.ServicePort{
-								TargetPort: "mesh", Protocol: pbcatalog.Protocol_PROTOCOL_MESH,
+								Protocol:   cfg.ActualProtocol,
 							})
 						}
 
 						v2svc := &pbcatalog.Service{
-							Workloads: &pbcatalog.WorkloadSelector{
-								Names: []string{svc.Workload},
-							},
-							Ports: svcPorts,
+							Workloads: &pbcatalog.WorkloadSelector{},
+							Ports:     svcPorts,
 						}
 
-						c.Services[svc.ID] = v2svc
+						prev, ok := c.Services[svc.ID]
+						if !ok {
+							c.Services[svc.ID] = v2svc
+							prev = v2svc
+						}
+						if prev.Workloads == nil {
+							prev.Workloads = &pbcatalog.WorkloadSelector{}
+						}
+						prev.Workloads.Names = append(prev.Workloads.Names, svc.Workload)
 
 					} else {
 						for _, name := range svc.V2Services {
@@ -475,6 +509,68 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 					}
 					if len(svc.WorkloadIdentities) > 0 {
 						return nil, fmt.Errorf("cannot specify workload identities for v1")
+					}
+				}
+			}
+		}
+
+		lastVIPIndex := 1
+		for _, svcData := range c.Services {
+			lastVIPIndex++
+			if lastVIPIndex > 250 {
+				return nil, fmt.Errorf("too many ips using this approach to VIPs")
+			}
+			svcData.VirtualIps = []string{
+				fmt.Sprintf("10.244.0.%d", lastVIPIndex),
+			}
+
+			// populate virtual ports where we forgot them
+			var (
+				usedPorts = make(map[uint32]struct{})
+				next      = uint32(8080)
+			)
+			for _, sp := range svcData.Ports {
+				if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
+					continue
+				}
+				if sp.VirtualPort > 0 {
+					usedPorts[sp.VirtualPort] = struct{}{}
+				}
+			}
+			for _, sp := range svcData.Ports {
+				if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
+					continue
+				}
+				if sp.VirtualPort > 0 {
+					continue
+				}
+			RETRY:
+				attempt := next
+				next++
+				_, used := usedPorts[attempt]
+				if used {
+					goto RETRY
+				}
+				usedPorts[attempt] = struct{}{}
+				sp.VirtualPort = attempt
+			}
+		}
+
+		if c.EnableV2 {
+			for _, n := range c.Nodes {
+				for _, svc := range n.Services {
+					for _, u := range svc.ImpliedUpstreams {
+						res, ok := c.Services[u.ID]
+						if ok {
+							for _, sp := range res.Ports {
+								if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
+									continue
+								}
+								if sp.TargetPort == u.PortName {
+									u.VirtualPort = sp.VirtualPort
+								}
+							}
+						}
 					}
 				}
 			}
@@ -591,6 +687,21 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 		for _, n := range c.Nodes {
 			for _, svc := range n.Services {
 				for _, u := range svc.Upstreams {
+					if u.Peer == "" {
+						u.Cluster = c.Name
+						u.Peering = nil
+						continue
+					}
+					remotePeer, ok := c.Peerings[u.Peer]
+					if !ok {
+						return nil, fmt.Errorf("not possible")
+					}
+					u.Cluster = remotePeer.Link.Name
+					u.Peering = remotePeer.Link
+					// this helps in generating fortio assertions; otherwise field is ignored
+					u.ID.Partition = remotePeer.Link.Partition
+				}
+				for _, u := range svc.ImpliedUpstreams {
 					if u.Peer == "" {
 						u.Cluster = c.Name
 						u.Peering = nil
