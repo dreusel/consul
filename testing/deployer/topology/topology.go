@@ -716,19 +716,15 @@ type ServiceAndNode struct {
 
 // Protocol is a convenience function to use when authoring topology configs.
 func Protocol(s string) (pbcatalog.Protocol, bool) {
-	// TODO(rb/v2): once L7 works in v2 switch these back
 	switch strings.ToLower(s) {
 	case "tcp":
 		return pbcatalog.Protocol_PROTOCOL_TCP, true
 	case "http":
-		return pbcatalog.Protocol_PROTOCOL_TCP, true
-		// return pbcatalog.Protocol_PROTOCOL_HTTP, true
+		return pbcatalog.Protocol_PROTOCOL_HTTP, true
 	case "http2":
-		return pbcatalog.Protocol_PROTOCOL_TCP, true
-		// return pbcatalog.Protocol_PROTOCOL_HTTP2, true
+		return pbcatalog.Protocol_PROTOCOL_HTTP2, true
 	case "grpc":
-		return pbcatalog.Protocol_PROTOCOL_TCP, true
-		// return pbcatalog.Protocol_PROTOCOL_GRPC, true
+		return pbcatalog.Protocol_PROTOCOL_GRPC, true
 	case "mesh":
 		return pbcatalog.Protocol_PROTOCOL_MESH, true
 	default:

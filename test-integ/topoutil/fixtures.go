@@ -42,9 +42,13 @@ func NewFortioServiceWithDefaults(
 
 	if nodeVersion == topology.NodeVersionV2 {
 		svc.Ports = map[string]*topology.Port{
-			"http":     {Number: httpPort, Protocol: "http"},
-			"http-alt": {Number: httpPort, Protocol: "http"},
-			"grpc":     {Number: grpcPort, Protocol: "grpc"},
+			// TODO(rb/v2): once L7 works in v2 switch these back
+			"http":     {Number: httpPort, Protocol: "tcp"},
+			"http-alt": {Number: httpPort, Protocol: "tcp"},
+			"grpc":     {Number: grpcPort, Protocol: "tcp"},
+			// "http":     {Number: httpPort, Protocol: "http"},
+			// "http-alt": {Number: httpPort, Protocol: "http"},
+			// "grpc":     {Number: grpcPort, Protocol: "grpc"},
 		}
 	} else {
 		svc.Port = httpPort
