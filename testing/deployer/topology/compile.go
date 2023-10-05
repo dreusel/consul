@@ -387,7 +387,7 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 				// 	return nil, fmt.Errorf("service has invalid protocol: %s", svc.Protocol)
 				// }
 
-				for _, u := range svc.Upstreams {
+				defaultUpstream := func(u *Upstream) error {
 					// Default to that of the enclosing service.
 					if u.Peer == "" {
 						if u.ID.Partition == "" {
@@ -406,43 +406,38 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 
 					addTenancy(u.ID.Partition, u.ID.Namespace)
 
-					if u.LocalAddress == "" {
-						// v1 defaults to 127.0.0.1 but v2 does not. Safe to do this generally though.
-						u.LocalAddress = "127.0.0.1"
+					if u.Implied {
+						if u.PortName == "" {
+							return fmt.Errorf("implicit upstreams must use port names in v2")
+						}
+					} else {
+						if u.LocalAddress == "" {
+							// v1 defaults to 127.0.0.1 but v2 does not. Safe to do this generally though.
+							u.LocalAddress = "127.0.0.1"
+						}
+						if u.PortName != "" && n.IsV1() {
+							return fmt.Errorf("explicit upstreams cannot use port names in v1")
+						}
+						if u.PortName == "" && n.IsV2() {
+							// Assume this is a v1->v2 conversion and name it.
+							u.PortName = "legacy"
+						}
 					}
 
-					if u.PortName != "" && n.IsV1() {
-						return nil, fmt.Errorf("explicit upstreams cannot use port names in v1")
-					}
-					if u.PortName == "" && n.IsV2() {
-						// Assume this is a v1->v2 conversion and name it.
-						u.PortName = "legacy"
+					return nil
+				}
+
+				for _, u := range svc.Upstreams {
+					if err := defaultUpstream(u); err != nil {
+						return nil, err
 					}
 				}
 
 				if n.IsV2() {
 					for _, u := range svc.ImpliedUpstreams {
 						u.Implied = true
-						// Default to that of the enclosing service.
-						if u.Peer == "" {
-							if u.ID.Partition == "" {
-								u.ID.Partition = svc.ID.Partition
-							}
-							if u.ID.Namespace == "" {
-								u.ID.Namespace = svc.ID.Namespace
-							}
-						} else {
-							if u.ID.Partition != "" {
-								u.ID.Partition = "" // irrelevant here; we'll set it to the value of the OTHER side for plumbing purposes in tests
-							}
-							u.ID.Namespace = NamespaceOrDefault(u.ID.Namespace)
-							foundPeerNames[c.Name][u.Peer] = struct{}{}
-						}
-
-						addTenancy(u.ID.Partition, u.ID.Namespace)
-
-						if u.PortName == "" {
-							return nil, fmt.Errorf("explicit upstreams must use port names in v2")
+						if err := defaultUpstream(u); err != nil {
+							return nil, err
 						}
 					}
 				} else {
