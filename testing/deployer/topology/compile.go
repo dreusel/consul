@@ -509,49 +509,12 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 			}
 		}
 
-		lastVIPIndex := 1
-		for _, svcData := range c.Services {
-			lastVIPIndex++
-			if lastVIPIndex > 250 {
-				return nil, fmt.Errorf("too many ips using this approach to VIPs")
-			}
-			svcData.VirtualIps = []string{
-				fmt.Sprintf("10.244.0.%d", lastVIPIndex),
-			}
-
-			// populate virtual ports where we forgot them
-			var (
-				usedPorts = make(map[uint32]struct{})
-				next      = uint32(8080)
-			)
-			for _, sp := range svcData.Ports {
-				if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
-					continue
-				}
-				if sp.VirtualPort > 0 {
-					usedPorts[sp.VirtualPort] = struct{}{}
-				}
-			}
-			for _, sp := range svcData.Ports {
-				if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
-					continue
-				}
-				if sp.VirtualPort > 0 {
-					continue
-				}
-			RETRY:
-				attempt := next
-				next++
-				_, used := usedPorts[attempt]
-				if used {
-					goto RETRY
-				}
-				usedPorts[attempt] = struct{}{}
-				sp.VirtualPort = attempt
-			}
+		if err := assignVirtualIPs(c); err != nil {
+			return nil, err
 		}
 
 		if c.EnableV2 {
+			// Populate the VirtualPort field on all implied upstreams.
 			for _, n := range c.Nodes {
 				for _, svc := range n.Services {
 					for _, u := range svc.ImpliedUpstreams {
@@ -775,6 +738,51 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 	}
 
 	return t, nil
+}
+
+func assignVirtualIPs(c *Cluster) error {
+	lastVIPIndex := 1
+	for _, svcData := range c.Services {
+		lastVIPIndex++
+		if lastVIPIndex > 250 {
+			return fmt.Errorf("too many ips using this approach to VIPs")
+		}
+		svcData.VirtualIps = []string{
+			fmt.Sprintf("10.244.0.%d", lastVIPIndex),
+		}
+
+		// populate virtual ports where we forgot them
+		var (
+			usedPorts = make(map[uint32]struct{})
+			next      = uint32(8080)
+		)
+		for _, sp := range svcData.Ports {
+			if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
+				continue
+			}
+			if sp.VirtualPort > 0 {
+				usedPorts[sp.VirtualPort] = struct{}{}
+			}
+		}
+		for _, sp := range svcData.Ports {
+			if sp.Protocol == pbcatalog.Protocol_PROTOCOL_MESH {
+				continue
+			}
+			if sp.VirtualPort > 0 {
+				continue
+			}
+		RETRY:
+			attempt := next
+			next++
+			_, used := usedPorts[attempt]
+			if used {
+				goto RETRY
+			}
+			usedPorts[attempt] = struct{}{}
+			sp.VirtualPort = attempt
+		}
+	}
+	return nil
 }
 
 const permutedWarning = "use the disabled node kind if you want to ignore a node"
