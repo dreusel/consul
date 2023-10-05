@@ -317,6 +317,13 @@ func compile(logger hclog.Logger, raw *Config, prev *Topology) (*Topology, error
 				return nil, fmt.Errorf("cluster %q node %q has more than one public address", c.Name, n.Name)
 			}
 
+			if n.IsDataplane() && len(n.Services) > 1 {
+				// Our use of consul-dataplane here is supposed to mimic that
+				// of consul-k8s, which ultimately has one IP per Service, so
+				// we introduce the same limitation here.
+				return nil, fmt.Errorf("cluster %q node %q uses dataplane, but has more than one service", c.Name, n.Name)
+			}
+
 			seenServices := make(map[ServiceID]struct{})
 			for _, svc := range n.Services {
 				if n.IsAgent() {
