@@ -129,16 +129,33 @@ func DockerImages(
 					"build",
 					"--build-arg",
 					"DATAPLANE_IMAGE=" + n.Images.Dataplane,
+					"-t", cdp,
+					"-",
+				}, logw, strings.NewReader(dockerfileDataplane))
+				if err != nil {
+					return err
+				}
+
+				built[cdp] = struct{}{}
+			}
+
+			cdpTproxy := n.Images.LocalDataplaneTProxyImage()
+			if _, ok := built[cdpTproxy]; cdpTproxy != "" && !ok {
+				logger.Info("building image", "image", cdpTproxy)
+				err := run.DockerExec(context.TODO(), []string{
+					"build",
+					"--build-arg",
+					"DATAPLANE_IMAGE=" + n.Images.Dataplane,
 					"--build-arg",
 					"CONSUL_IMAGE=" + n.Images.Consul,
-					"-t", cdp,
+					"-t", cdpTproxy,
 					"-",
 				}, logw, strings.NewReader(dockerfileDataplaneForTProxy))
 				if err != nil {
 					return err
 				}
 
-				built[cdp] = struct{}{}
+				built[cdpTproxy] = struct{}{}
 			}
 		}
 	}
