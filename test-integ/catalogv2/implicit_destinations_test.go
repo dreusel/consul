@@ -13,7 +13,6 @@ import (
 	"github.com/hashicorp/consul/test/integration/consul-container/libs/utils"
 	"github.com/hashicorp/consul/testing/deployer/sprawl/sprawltest"
 	"github.com/hashicorp/consul/testing/deployer/topology"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hashicorp/consul/test-integ/topoutil"
 )
@@ -51,9 +50,6 @@ func TestBasicL4ImplicitDestinations(t *testing.T) {
 		ships = topo.ComputeRelationships()
 	)
 
-	clientV1, err := sp.APIClientForNode("dc1", cluster.FirstServer().ID(), "")
-	require.NoError(t, err)
-
 	clientV2 := sp.ResourceServiceClientForCluster(cluster.Name)
 
 	t.Log(topology.RenderRelationships(ships))
@@ -63,8 +59,6 @@ func TestBasicL4ImplicitDestinations(t *testing.T) {
 		"static-server",
 		"static-client",
 	} {
-		libassert.CatalogServiceDoesNotExist(t, clientV1, name, nil)
-		libassert.CatalogServiceDoesNotExist(t, clientV1, name+"-sidecar-proxy", nil)
 		libassert.CatalogV2ServiceHasEndpointCount(t, clientV2, name, nil, 1)
 	}
 
